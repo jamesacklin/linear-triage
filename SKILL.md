@@ -288,6 +288,14 @@ human:
 Then ask what to apply. Accepting a whole tier at once is a reasonable thing for
 the user to want; assuming it is not.
 
+**A label group is a swap, not an addition.** When a proposed group value
+displaces one already on the issue, the proposal carries `replaces`. Present it
+as `Investigating → Active impact`, never as `+ Active impact`: the two read
+very differently to a reviewer, and on a Reliability phase the difference is
+whether customer impact is claimed to be confirmed. Writing it needs
+`removeLabels` alongside `addLabels` — Linear rejects the write outright if you
+try to add a second child of the same group, which is how this was found.
+
 `split` and `refine` are not estimates and must not be written to the estimate
 field. They are recommendations about the issue itself — surface them as such,
 and leave the field empty.

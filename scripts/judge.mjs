@@ -405,7 +405,7 @@ function weightedConfidence(confidences, weights) {
   return wsum ? sum / wsum : null;
 }
 
-function composePriority(cfg, answers, plan, tasks) {
+function composePriority(cfg, answers, plan, tasks, issue) {
   const severity = normScore(answers.severity, cfg.dimensions.severity.criteria.length);
   const reach = normScore(answers.reach, cfg.dimensions.reach.criteria.length);
   const timeSensitivity = normScore(answers.time_sensitivity, cfg.dimensions.time_sensitivity.criteria.length);
@@ -456,7 +456,20 @@ function composePriority(cfg, answers, plan, tasks) {
           continue;
         }
       }
-      groupChoices.push({ group: group.name, value: ans.choice, confidence: round(ans.confidence) });
+      // Group children are mutually exclusive, so proposing one while another
+      // is already applied is a *swap*, not an addition — and Linear rejects
+      // the write outright if you try to add both. Surface which label it
+      // displaces so the reviewer approves a phase change rather than what
+      // looks like one more label, and so the writer knows to remove the old.
+      const children = plan.groups.find((g) => g.group.name === group.name)?.children ?? [];
+      const applied = new Set(issue?.labels ?? []);
+      const displaced = children.map((c) => c.name).find((n) => n !== ans.choice && applied.has(n)) ?? null;
+      groupChoices.push({
+        group: group.name,
+        value: ans.choice,
+        confidence: round(ans.confidence),
+        ...(displaced ? { replaces: displaced } : {}),
+      });
     }
   }
 
@@ -681,7 +694,7 @@ async function triageIssues(input, cfg, opts) {
       usage.output_tokens += res.usage?.output_tokens ?? 0;
 
       const answers = res.answers ?? {};
-      const proposed = tasks.priority ? composePriority(cfg, answers, plan, tasks) : {};
+      const proposed = tasks.priority ? composePriority(cfg, answers, plan, tasks, n) : {};
       const estimate = tasks.estimate ? composeEstimate(cfg, answers, scale) : skippedEstimate;
 
       // Tier on everything the pass actually decided. An estimate-only run has
