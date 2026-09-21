@@ -108,7 +108,7 @@
     "urgent": 0.8,
     "high": 0.6,
     "medium": 0.35,
-    "low": 0.0
+    "low": 0
   },
   "confidence": {
     "_comment": "Confidence measures how concentrated the model's probability distribution is, NOT whether it is right. Tiering uses a weight-aware average of the priority dimensions plus work_kind, because a min() across everything lets one structurally-uncertain dimension drag every issue into the bottom tier. Dimensions below uncertain_below are surfaced by name instead.",
@@ -227,11 +227,26 @@
     "bands": {
       "_comment": "Effort (0..1) to a POSITION on the team's scale, not to a value — index 0 is the smallest value the team uses, whatever it happens to be. Upper bound of each band, checked top down. Deliberately stops at index 4: the extended values (Fibonacci 13/21, exponential 32/64) exist for work that should be split instead, and this skill proposes the split rather than the number.",
       "cuts": [
-        { "below": 0.12, "index": 0 },
-        { "below": 0.30, "index": 1 },
-        { "below": 0.52, "index": 2 },
-        { "below": 0.74, "index": 3 },
-        { "below": 1.01, "index": 4 }
+        {
+          "below": 0.12,
+          "index": 0
+        },
+        {
+          "below": 0.3,
+          "index": 1
+        },
+        {
+          "below": 0.52,
+          "index": 2
+        },
+        {
+          "below": 0.74,
+          "index": 3
+        },
+        {
+          "below": 1.01,
+          "index": 4
+        }
       ]
     },
     "min_estimable": 0.5,
@@ -249,16 +264,93 @@
     "_reestimate_existing_note": "By default only unestimated issues get a proposal. A number already in the field usually came from a person who knew more than the issue text does; overwriting it silently is the expensive mistake. Ask for a re-estimate explicitly to override.",
     "scales": {
       "_comment": "From Linear's estimate docs. T-shirt sizes are stored as the Fibonacci numbers and only displayed as letters. Zero is a separate 'allow zero estimates' setting and is never part of the ordered scale.",
-      "exponential": { "values": [1, 2, 4, 8, 16], "extended": [32, 64] },
-      "fibonacci": { "values": [1, 2, 3, 5, 8], "extended": [13, 21] },
-      "linear": { "values": [1, 2, 3, 4, 5], "extended": [6, 7] },
+      "exponential": {
+        "values": [
+          1,
+          2,
+          4,
+          8,
+          16
+        ],
+        "extended": [
+          32,
+          64
+        ]
+      },
+      "fibonacci": {
+        "values": [
+          1,
+          2,
+          3,
+          5,
+          8
+        ],
+        "extended": [
+          13,
+          21
+        ]
+      },
+      "linear": {
+        "values": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "extended": [
+          6,
+          7
+        ]
+      },
       "tShirt": {
-        "values": [1, 2, 3, 5, 8],
-        "extended": [13, 21],
-        "labels": ["XS", "S", "M", "L", "XL"],
-        "extended_labels": ["XXL", "XXXL"]
+        "values": [
+          1,
+          2,
+          3,
+          5,
+          8
+        ],
+        "extended": [
+          13,
+          21
+        ],
+        "labels": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL"
+        ],
+        "extended_labels": [
+          "XXL",
+          "XXXL"
+        ]
       }
     }
+  },
+  "pr_metrics": {
+    "_comment": "Sizing completed work from the PRs that delivered it (scripts/pr-metrics.mjs, needs the gh CLI). Measured once against a real milestone: judged estimates correlated with churn at only 0.37 and ran systematically small, so a merged PR is better evidence than a description wherever one exists. See “What the estimates are worth” in SKILL.md.",
+    "churn_bands": [
+      50,
+      200,
+      600,
+      2000
+    ],
+    "_churn_bands_note": "Ascending upper bounds on churn (additions + deletions) mapping to positions on the team’s scale: <50 index 0, <200 index 1, <600 index 2, <2000 index 3, else index 4. Log-ish on purpose — churn spanned 9 to 6,706 in one milestone, and linear cuts would collapse almost everything into one bucket.",
+    "iteration_bump_at": 20,
+    "_iteration_bump_at_note": "Commits + human reviews + human comments at or above this move the estimate one position up, never down. Heavy iteration means the change was argued over, which is effort the diff size does not show.",
+    "bot_authors": [
+      "linear-code",
+      "github-actions",
+      "dependabot",
+      "claude",
+      "codex"
+    ],
+    "_bot_authors_note": "Substring match on the PR review/comment author login. Bot chatter is not review effort, and counting it would reward noisy automation. Linear’s own linkback comment appears on every linked PR.",
+    "_not_used_note": "Wall-clock time to merge is reported per PR but never scored on. It measures calendar latency, not effort: on the calibration run a 4,030-line PR merged in 0.0 hours while a 13-line one took 49.",
+    "count_abandoned_churn": false,
+    "_count_abandoned_churn_note": "Churn measures the change that SHIPPED, so a closed-unmerged PR is excluded by default: counting it would call an issue large because it was got wrong four times. The rework still counts as iteration and is reported as abandoned_churn. Set true if velocity is meant to track effort spent rather than change delivered."
   },
   "labels": {
     "_comment": "Real workspaces carry far more labels than are worth judging per issue. Candidates are shortlisted in code before the model sees them; these settings control that shortlist. Tuned against the Tlon team's 99 labels.",

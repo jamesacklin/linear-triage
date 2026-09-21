@@ -32,6 +32,7 @@ The division that makes this work:
 | Selecting which issues are in range | `scripts/scope.mjs` in plain code | Filtering is not a judgment, and a scope mistake is the costly one |
 | Shortlisting which labels to even ask about | `scripts/judge.mjs` in plain code | Free, and keeps the model's question count bounded |
 | Semantic judgments — kind, severity, reach, effort | `scripts/judge.mjs` → Jev | Needs reading comprehension |
+| Sizing work that already shipped | `scripts/pr-metrics.mjs` from merged PRs | A delivered diff is a measurement, not a judgment |
 | Dates, counts, ranking, thresholds, scale bands | `scripts/judge.mjs` in plain code | Deterministic; a model would only add noise and cost |
 
 **Nothing writes to Linear without explicit approval.** This is the core
@@ -377,6 +378,38 @@ Keep the two apart when reporting. Measured points describe what a milestone
 cost; judged points describe what is left. Averaging them into one velocity
 figure silently mixes a measurement with a forecast.
 
+### Doing it
+
+```bash
+node scripts/scope.mjs --milestone v9.5.3 --include-terminal < fetched.json > scoped.json
+node scripts/judge.mjs --only estimate < scoped.json > judged.json
+node scripts/pr-metrics.mjs --repo owner/name --merge judged.json < scoped.json > final.json
+```
+
+`--merge` applies the rule above and stamps every estimate with `source`, the
+judged value it displaced, and — where nothing could be measured — the reason.
+Without `--merge` it just reports the measurements.
+
+Three things decide whether a run is trustworthy, and all three are reported:
+
+- **Include `gitBranchName` in the Linear fetch.** The exact-branch match is the
+  only unambiguous link. Without it every issue falls back to a text search, and
+  the script says so on stderr.
+- **A mention is not a delivery.** A PR is attributed only when the issue id is
+  in its branch or title, or behind a closing keyword. Matching on "the body
+  mentions it" attributes a PR to every neighbour a spec cites, which then halves
+  the churn of the issue that actually owns it.
+- **GitHub's search API allows 30 requests a minute** — far below its 5,000/hour
+  core limit. The script throttles and backs off. It will never report a
+  rate-limited lookup as "no PRs"; a failed lookup comes back as
+  `lookup_failed`, because "we could not ask" and "there is nothing there" are
+  different answers.
+
+Churn counts what *shipped*. A closed-unmerged PR is an attempt, not a delivery —
+it is reported as `abandoned_churn` and counted as iteration, so an issue is not
+called large because it was got wrong four times. Flip `count_abandoned_churn` if
+your velocity is meant to track effort spent instead.
+
 ## When the judgments look wrong
 
 Work through it in this order, because the cheapest fixes are also the most common:
@@ -418,3 +451,4 @@ points at the model's jaggedness notes.
 - `references/linear.md` — priority enum (inverted: 1 is most urgent), estimate
   scales and where to find a team's, state types, the connector's quirks
 - `config/triage.config.json` — level descriptions, weights, thresholds, bands
+- `scripts/pr-metrics.mjs` — sizing shipped work from merged PRs; needs the `gh` CLI, spends no model tokens, and only reads

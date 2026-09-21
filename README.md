@@ -31,6 +31,7 @@ SKILL.md                     the workflow Claude follows
 config/triage.config.json    level descriptions, weights, thresholds, bands — tune this
 scripts/scope.mjs            select the range to act on (no API calls)
 scripts/judge.mjs            issues → typed judgments via Jev
+scripts/pr-metrics.mjs       size completed work from its merged PRs (needs gh)
 scripts/candidates.mjs       cheap duplicate-candidate blocking (no API calls)
 scripts/retune.mjs           re-derive priority and estimates from saved judgments (no API calls)
 references/typesafe.md       API contract and primitive selection
@@ -135,7 +136,25 @@ Estimate confidence is the usable signal: at ≥ 0.80 the judged size matched
 measured churn 7/10 within one size; below 0.80, 4/12.
 
 So: size completed work from its merged PR where one exists, and judge only what
-has no measurement. See "What the estimates are worth" in SKILL.md.
+has no measurement. `pr-metrics.mjs` does the measuring, and `--merge` applies
+that rule to a judged run:
+
+```bash
+node scripts/scope.mjs --milestone v9.5.3 --include-terminal < fetched.json > scoped.json
+node scripts/judge.mjs --only estimate < scoped.json > judged.json
+node scripts/pr-metrics.mjs --repo owner/name --merge judged.json < scoped.json > final.json
+```
+
+Each estimate then carries `source: "pr_metrics" | "judged"`, the judged value it
+replaced, and — where it was judged — why no measurement was available.
+
+It needs the `gh` CLI. Two things worth knowing before trusting a run: include
+`gitBranchName` in the Linear fetch (the exact-branch match is the only
+unambiguous link, and without it every issue falls back to a text search), and
+note that GitHub's search API allows just **30 requests a minute**, so the script
+throttles and backs off rather than reporting a rate-limited lookup as "no PRs".
+
+See "What the estimates are worth" in SKILL.md.
 
 ## Retuning is free
 
