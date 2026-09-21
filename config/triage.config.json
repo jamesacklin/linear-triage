@@ -1,0 +1,157 @@
+{
+  "model": "jev-latest",
+  "_comment": "Tune this file, not the code. Level descriptions are sent to Jev verbatim as criteria, so rewording them changes the judgments. Weights and thresholds are applied in code after the model answers, so changing them re-derives priority WITHOUT a new API call (see 'Retuning is free' in SKILL.md).",
+  "dimensions": {
+    "severity": {
+      "instructions": {
+        "question": "How badly is the person filing this blocked from doing what they set out to do?",
+        "focus": "Judge the impact described, not how upset the reporter sounds. A calmly worded outage is still an outage; an angry report about a typo is still a typo."
+      },
+      "criteria": [
+        {
+          "what": "Cosmetic or textual. Everything works; something looks wrong or reads wrong.",
+          "examples": [
+            "misaligned icon",
+            "typo in a tooltip",
+            "inconsistent button padding"
+          ]
+        },
+        {
+          "what": "A feature is degraded or awkward, but the person can still complete the task.",
+          "examples": [
+            "sort order resets after reload",
+            "slow but functional export",
+            "confusing error copy that still lets you recover"
+          ]
+        },
+        {
+          "what": "A feature is broken with no workaround. The person cannot complete this task at all, but the rest of the product works.",
+          "examples": [
+            "file upload always fails",
+            "cannot save settings",
+            "search returns nothing"
+          ]
+        },
+        {
+          "what": "Data loss, data corruption, a security exposure, or an outage of the whole product.",
+          "examples": [
+            "records deleted on save",
+            "one account can read another's data",
+            "all requests 500"
+          ]
+        }
+      ]
+    },
+    "reach": {
+      "instructions": {
+        "question": "How many of the product's users run into this?",
+        "focus": "Judge the affected population, not the number of reports. A single observed occurrence is not evidence of narrow reach unless the report explains why other users are unaffected. If the evidence is one case but nothing bounds it to that case, the population is unknown and probably broad."
+      },
+      "criteria": [
+        {
+          "what": "Confined to one account or configuration, and the report gives a specific reason it would not affect anyone else.",
+          "examples": [
+            "corrupted data in one workspace",
+            "a setting only this customer uses"
+          ]
+        },
+        {
+          "what": "A narrow but identifiable slice defined by something the report names: one platform, one integration, one plan tier, one locale.",
+          "examples": [
+            "Android only",
+            "only accounts using SAML"
+          ]
+        },
+        {
+          "what": "Anyone who uses a common feature, or an unknown population that the evidence does not bound \u2014 few observed occurrences but no stated reason others are safe.",
+          "examples": [
+            "one crash report in a shared code path",
+            "a single 503 with no explanation of why it is isolated"
+          ]
+        },
+        {
+          "what": "Effectively everyone, or anyone attempting a core flow such as signing in, loading the app, or saving work."
+        }
+      ]
+    },
+    "time_sensitivity": {
+      "instructions": {
+        "question": "Is there a deadline or ongoing damage that makes waiting costly?",
+        "focus": "Look for an external date, a contractual or compliance obligation, or harm that accumulates while the issue is open. Absence of urgent wording is not itself evidence of low urgency."
+      },
+      "criteria": [
+        {
+          "what": "No deadline. Waiting a release or two costs nothing in particular."
+        },
+        {
+          "what": "A real but soft date: a launch, a customer demo, a sprint boundary that this is meant to land before."
+        },
+        {
+          "what": "Damage accrues every day it stays open, or a hard external deadline has passed or is imminent.",
+          "examples": [
+            "losing revenue per hour",
+            "regulatory deadline this week",
+            "blocking another team right now"
+          ]
+        }
+      ]
+    }
+  },
+  "weights": {
+    "_comment": "Must sum to 1.0. These encode what your team means by 'important'. Raise reach if you optimize for breadth; raise severity if you optimize for depth of pain.",
+    "severity": 0.5,
+    "reach": 0.3,
+    "time_sensitivity": 0.2
+  },
+  "priority_thresholds": {
+    "_comment": "Composite urgency (0..1) mapped to Linear's priority enum. Linear's numbering is inverted from intuition: 1=Urgent is the MOST urgent, 4=Low the least. Bands are checked top down.",
+    "urgent": 0.8,
+    "high": 0.6,
+    "medium": 0.35,
+    "low": 0.0
+  },
+  "confidence": {
+    "_comment": "Confidence measures how concentrated the model's probability distribution is, NOT whether it is right. Tiering uses a weight-aware average of the priority dimensions plus work_kind, because a min() across everything lets one structurally-uncertain dimension drag every issue into the bottom tier. Dimensions below uncertain_below are surfaced by name instead.",
+    "auto_suggest": 0.75,
+    "needs_attention": 0.5,
+    "uncertain_below": 0.35
+  },
+  "hygiene": {
+    "stale_days": 45,
+    "duplicate_candidate_limit": 8,
+    "duplicate_threshold": 1.5
+  },
+  "labels": {
+    "_comment": "Real workspaces carry far more labels than are worth judging per issue. Candidates are shortlisted in code before the model sees them; these settings control that shortlist. Tuned against the Tlon team's 99 labels.",
+    "max_candidates": 12,
+    "apply_threshold": 0.6,
+    "exclude_groups": [
+      "Release"
+    ],
+    "_exclude_groups_note": "Release/version tags are bookkeeping applied at ship time, not a semantic judgment about the issue.",
+    "exclude_names": [
+      "Triage",
+      "Next Release",
+      "Pre-release",
+      "latest build"
+    ],
+    "always_consider": [
+      "Reliability phase"
+    ],
+    "_always_consider_note": "Groups listed here are judged even when no child is applied yet, which is how an untriaged Reliability issue gets its phase.",
+    "kind_label_map": {
+      "bug": "Bug",
+      "feature": "Feature",
+      "improvement": "Improvement"
+    },
+    "_kind_label_map_note": "These labels are driven by the work_kind Choice instead of separate Nouls, so the two cannot disagree.",
+    "min_relevance": 0.12,
+    "group_gates": {
+      "Reliability phase": {
+        "label": "Reliability",
+        "min": 0.6
+      }
+    },
+    "_group_gates_note": "Ask the group question speculatively, then keep the answer only when the gating label also scored high. A forced Choice always picks something, so the gate \u2014 not the model \u2014 decides whether the group applies at all."
+  }
+}

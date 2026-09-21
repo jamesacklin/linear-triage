@@ -1,0 +1,29 @@
+{
+  "skill_name": "linear-triage",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our triage inbox has piled up again — there are about 30 issues in there with no priority and no labels. Can you go through them and tell me what you'd set?",
+      "expected_output": "Fetches triage-state issues with descriptions and comments, fetches the team's labels, runs judge.mjs, presents proposals grouped by review tier with a 'needs you' section, and waits for approval before writing anything.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I think we have a bunch of duplicate bug reports about the uploader. Can you find them?",
+      "expected_output": "Runs candidates.mjs to block pairs before any model call, then judge.mjs --mode duplicates, and reports the three-way verdict (duplicate / related / unrelated) rather than collapsing to a binary. Proposes merges without performing them.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "You flagged way too many things as Urgent last time. We only want Urgent for stuff that's actively on fire.",
+      "expected_output": "Recognizes this as a policy change rather than a judgment error. Raises priority_thresholds.urgent and reruns retune.mjs against the saved proposals instead of re-calling the API, and explains why no re-judgment was needed.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "what should the team pick up next week? we've got maybe 80 open issues on ENG",
+      "expected_output": "Scopes to open non-terminal issues on the team, excludes priority=0 from ranking rather than letting unprioritized issues sort to the top, and ranks by composite urgency showing the dimension breakdown.",
+      "files": []
+    }
+  ]
+}

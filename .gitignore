@@ -1,0 +1,4 @@
+.env
+*.env
+proposals*.json
+node_modules/

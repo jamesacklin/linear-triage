@@ -1,0 +1,291 @@
+{
+  "model": "jev-latest",
+  "usage": {
+    "input_tokens": 12472,
+    "output_tokens": 1447,
+    "requests": 4,
+    "label_questions": 33
+  },
+  "proposals": [
+    {
+      "id": "TLON-6500",
+      "identifier": "TLON-6500",
+      "title": "api-pkg: reauth is not scoped to the client that initiated it, so it can cross an account switch",
+      "url": null,
+      "current": {
+        "priority": 0,
+        "labels": [
+          "Bug"
+        ],
+        "state": null
+      },
+      "proposed": {
+        "work_kind": "bug",
+        "work_kind_confidence": 1,
+        "priority": 2,
+        "priority_name": "High",
+        "urgency": 0.749,
+        "dimensions": {
+          "severity": {
+            "normalized": 0.997,
+            "raw": 2.99,
+            "confidence": 0.99
+          },
+          "reach": {
+            "normalized": 0.767,
+            "raw": 2.3,
+            "confidence": 0.48
+          },
+          "time_sensitivity": {
+            "normalized": 0.105,
+            "raw": 0.21,
+            "confidence": 0.69
+          }
+        },
+        "labels": [
+          {
+            "name": "Bug",
+            "probability": 1,
+            "from": "work_kind"
+          }
+        ],
+        "label_groups": [],
+        "label_groups_gated_out": [
+          {
+            "group": "Reliability phase",
+            "would_have_been": "Investigating",
+            "gate": "Reliability",
+            "gate_probability": 0.08
+          }
+        ],
+        "hygiene": {
+          "has_repro": 0.44,
+          "is_actionable": 0.78
+        },
+        "confidence": 0.777,
+        "uncertain_dimensions": [],
+        "review_tier": "confident"
+      },
+      "staleness": {
+        "days_since_update": 2,
+        "stale": false
+      }
+    },
+    {
+      "id": "TLON-6489",
+      "identifier": "TLON-6489",
+      "title": "[Fatal Crash] RNSTabBarAppearanceCoordinator updateTabBarItem:withImage:isSelected:forScreenView:",
+      "url": null,
+      "current": {
+        "priority": 0,
+        "labels": [
+          "Active impact",
+          "Reliability"
+        ],
+        "state": null
+      },
+      "proposed": {
+        "work_kind": "bug",
+        "work_kind_confidence": 1,
+        "priority": 2,
+        "priority_name": "High",
+        "urgency": 0.626,
+        "dimensions": {
+          "severity": {
+            "normalized": 0.827,
+            "raw": 2.48,
+            "confidence": 0.5
+          },
+          "reach": {
+            "normalized": 0.59,
+            "raw": 1.77,
+            "confidence": 0.75
+          },
+          "time_sensitivity": {
+            "normalized": 0.18,
+            "raw": 0.36,
+            "confidence": 0.46
+          }
+        },
+        "labels": [
+          {
+            "name": "Bug",
+            "probability": 1,
+            "from": "work_kind"
+          },
+          {
+            "name": "iOS",
+            "probability": 0.93
+          },
+          {
+            "name": "Reliability",
+            "probability": 0.91
+          },
+          {
+            "name": "Needs Repro",
+            "probability": 0.62
+          }
+        ],
+        "label_groups": [
+          {
+            "group": "Reliability phase",
+            "value": "Active impact",
+            "confidence": 0.95
+          }
+        ],
+        "label_groups_gated_out": [],
+        "hygiene": {
+          "has_repro": 0.2,
+          "is_actionable": 0.73
+        },
+        "confidence": 0.567,
+        "uncertain_dimensions": [],
+        "review_tier": "review"
+      },
+      "staleness": {
+        "days_since_update": 2,
+        "stale": false
+      }
+    },
+    {
+      "id": "TLON-6609",
+      "identifier": "TLON-6609",
+      "title": "Pagryl Messenger initialization and reads fail with HTTP 503",
+      "url": null,
+      "current": {
+        "priority": 2,
+        "labels": [
+          "Active impact",
+          "Reliability"
+        ],
+        "state": null
+      },
+      "proposed": {
+        "work_kind": "bug",
+        "work_kind_confidence": 0.99,
+        "priority": 2,
+        "priority_name": "High",
+        "urgency": 0.688,
+        "dimensions": {
+          "severity": {
+            "normalized": 0.82,
+            "raw": 2.46,
+            "confidence": 0.54
+          },
+          "reach": {
+            "normalized": 0.657,
+            "raw": 1.97,
+            "confidence": 0.88
+          },
+          "time_sensitivity": {
+            "normalized": 0.405,
+            "raw": 0.81,
+            "confidence": 0
+          }
+        },
+        "labels": [
+          {
+            "name": "Bug",
+            "probability": 0.99,
+            "from": "work_kind"
+          },
+          {
+            "name": "Reliability",
+            "probability": 0.87
+          }
+        ],
+        "label_groups": [
+          {
+            "group": "Reliability phase",
+            "value": "Active impact",
+            "confidence": 0.96
+          }
+        ],
+        "label_groups_gated_out": [],
+        "hygiene": {
+          "has_repro": 0.19,
+          "is_actionable": 0.79
+        },
+        "confidence": 0.534,
+        "uncertain_dimensions": [
+          {
+            "dimension": "time_sensitivity",
+            "confidence": 0
+          }
+        ],
+        "review_tier": "review"
+      },
+      "staleness": {
+        "days_since_update": 2,
+        "stale": false
+      }
+    },
+    {
+      "id": "TLON-6571",
+      "identifier": "TLON-6571",
+      "title": "reconcile the two hosting classifiers: nodeUrlIsHosted vs hostingFromHostname",
+      "url": null,
+      "current": {
+        "priority": 0,
+        "labels": [
+          "Tech Debt"
+        ],
+        "state": null
+      },
+      "proposed": {
+        "work_kind": "chore",
+        "work_kind_confidence": 0.66,
+        "priority": 4,
+        "priority_name": "Low",
+        "urgency": 0.229,
+        "dimensions": {
+          "severity": {
+            "normalized": 0.13,
+            "raw": 0.39,
+            "confidence": 0.61
+          },
+          "reach": {
+            "normalized": 0.547,
+            "raw": 1.64,
+            "confidence": 0.61
+          },
+          "time_sensitivity": {
+            "normalized": 0,
+            "raw": 0,
+            "confidence": 1
+          }
+        },
+        "labels": [
+          {
+            "name": "Tech Debt",
+            "probability": 0.93
+          },
+          {
+            "name": "Hosting",
+            "probability": 0.88
+          }
+        ],
+        "label_groups": [],
+        "label_groups_gated_out": [
+          {
+            "group": "Reliability phase",
+            "would_have_been": "Prevention",
+            "gate": "Reliability",
+            "gate_probability": 0.07
+          }
+        ],
+        "hygiene": {
+          "has_repro": 0.69,
+          "is_actionable": 0.87
+        },
+        "confidence": 0.66,
+        "uncertain_dimensions": [],
+        "review_tier": "review"
+      },
+      "staleness": {
+        "days_since_update": 3,
+        "stale": false
+      }
+    }
+  ]
+}
