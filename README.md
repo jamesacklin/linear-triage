@@ -124,6 +124,19 @@ The scale itself is never assumed. The MCP connector doesn't expose
 team's issues and refuses to commit when the values fit more than one scale —
 `{1, 2, 3}` fits three of the four.
 
+## How good are the estimates?
+
+Measured once against a real milestone (28 issues, 22 with linked PRs), judged
+estimates correlate with actual PR churn at only **0.37**, and they run
+**systematically small** — every issue that measured XL by churn came back M or S.
+A description states intent; intent does not carry extent.
+
+Estimate confidence is the usable signal: at ≥ 0.80 the judged size matched
+measured churn 7/10 within one size; below 0.80, 4/12.
+
+So: size completed work from its merged PR where one exists, and judge only what
+has no measurement. See "What the estimates are worth" in SKILL.md.
+
 ## Retuning is free
 
 Weights, thresholds, and bands are applied after the model answers, so "we're
