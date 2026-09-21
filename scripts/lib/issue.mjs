@@ -30,6 +30,12 @@
 export const TERMINAL = new Set(["completed", "canceled", "cancelled", "duplicate"]);
 export const STATE_TYPES = new Set(["triage", "backlog", "unstarted", "started", ...TERMINAL]);
 
+// `list_issues` caps `description` at 500 characters and appends this marker.
+// It is the one piece of good news about that cap: incomplete evidence is
+// detectable, so the pass can say which judgments were made on a fragment
+// instead of leaving the reader to guess.
+export const TRUNCATION_MARK = "(truncated, use `get_issue` for full description)";
+
 const lower = (s) => String(s ?? "").trim().toLowerCase();
 
 /** `{name}` / `{id}` / plain string → string. */
@@ -58,6 +64,7 @@ export function normalizeIssue(issue) {
     identifier: issue.identifier ?? issue.id,
     title: issue.title ?? "",
     description: issue.description ?? "",
+    descriptionTruncated: (issue.description ?? "").includes(TRUNCATION_MARK),
     comments: (issue.comments ?? []).map((c) => c.body ?? c),
     stateName: asName(issue.status ?? issue.state),
     stateType,

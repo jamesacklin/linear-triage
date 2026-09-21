@@ -627,6 +627,15 @@ async function triageIssues(input, cfg, opts) {
         state_type: n.stateType,
         milestone: n.milestone,
       },
+      // What the model was actually given. A confident answer drawn from a
+      // truncated description and no comments is still a confident answer about
+      // a fragment, and the reviewer should be able to see that without
+      // re-deriving it.
+      evidence: {
+        description_chars: n.description.length,
+        description_truncated: n.descriptionTruncated,
+        comments: n.comments.length,
+      },
     };
 
     // Block before spending. An issue a person already sized does not need an

@@ -145,10 +145,22 @@ fixtures use, in one place, for exactly this reason.
 
 ### `description` is truncated to 500 characters
 
-`list_issues` does not omit descriptions — it **truncates them at 500 chars**,
-silently and with no marker. `get_issue` returns the full text, one issue per
-call. On a real run the difference was stark: a spec that is 15,000 characters in
-Linear arrives as 500, losing the entire design, the task list, and the evidence.
+`list_issues` does not omit descriptions — it **truncates them at 500 chars**.
+`get_issue` returns the full text, one issue per call. On a real run the
+difference was stark: a spec that is 15,000 characters in Linear arrives as 500,
+losing the entire design, the task list, and the evidence. In one 32-issue scope,
+24 were truncated.
+
+The cap is **not** size-adaptive — asking for two issues instead of 250 returns
+the same 500 characters — so there is no way to widen it. But it is marked:
+
+    … (truncated, use `get_issue` for full description)
+
+which is the one piece of good news, because it makes incomplete evidence
+*detectable*. `scope.mjs` counts these and warns, and `judge.mjs` records
+`evidence.description_truncated` on each proposal, so a reviewer can tell a
+confident judgment about a whole issue from a confident judgment about its first
+paragraph.
 
 So a scoped pass has a real choice to make, and it should be made out loud:
 

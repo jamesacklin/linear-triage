@@ -202,6 +202,12 @@ function warnings(selected, scope) {
   const n = selected.length;
   if (!n) return ["Nothing matched this scope. Widen it or check that the fetch actually covered the range."];
 
+  const truncated = selected.filter((i) => i.descriptionTruncated).length;
+  if (truncated) {
+    out.push(
+      `${truncated} of ${n} descriptions were cut off at 500 characters by list_issues. A judgment drawn from the first 500 characters of a 15,000-character spec is thin evidence, not a thin issue — re-fetch those with get_issue, or expect the confidence tiers to carry the doubt.`,
+    );
+  }
   const noDesc = selected.filter((i) => !i.description.trim()).length;
   if (noDesc) {
     out.push(`${noDesc} of ${n} issues have an empty description. Jev reads only what is sent, so these will be judged from a title alone and should land in the low-confidence tier.`);
