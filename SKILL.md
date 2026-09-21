@@ -331,6 +331,52 @@ priority should this be?" or "how many points?" directly. One question returns a
 answer you cannot argue with; several dimensions return evidence you can re-weigh
 when the team's definition of important — or of a 3 — shifts.
 
+## What the estimates are worth: one measured calibration
+
+Run once, against the Tlon team's v9.5.3 milestone — 28 issues, 22 of them with
+linked GitHub PRs — comparing this skill's judged estimates against measured PR
+churn (additions + deletions, banded on a log scale).
+
+**They agree less than you would hope.** Rank correlation **0.37**; 6 of 22 exact,
+11 of 22 within one size.
+
+**The error has a direction: judged estimates run small.** Mean difference −0.73
+sizes. Every one of the six issues that measured XL by churn came back M or S:
+
+| Issue | Measured | Judged |
+| --- | --- | --- |
+| require valid hosting auth | XL — 4,030 lines, 43 files | M |
+| migrate notebook to native header | XL — 1,013 lines | M |
+| duplicate tombstones | XL — 752 lines across 5 PRs | S |
+
+The cause is worth internalizing, because it is not a rubric bug: **a description
+states intent, and intent does not carry extent.** "We should require hosting
+auth" is 514 characters and 4,030 lines of work. Feeding the model a longer
+description does not fix it — one of these had a 4,546-character write-up and
+still scored M against 1,381 lines. The `scope` dimension asks how much of the
+product changes, and a person writing a bug report does not yet know that.
+
+**Confidence is the usable signal.** Where the estimate confidence was ≥ 0.80 it
+matched measured churn 5/10 exactly and 7/10 within one size; below 0.80, 1/12 and
+4/12. That is the tier doing its job — treat a low-confidence estimate as a
+request for a human, not as a number.
+
+### The rule this implies
+
+Prefer a measurement where a real one exists, and judge only where it cannot:
+
+- **Completed, with a merged PR** → size from PR churn. That is the delivered
+  change, not a guess about it. It also covers the case the model cannot touch at
+  all: an issue whose entire description is a screenshot.
+- **Everything else** → judge it. Open and abandoned PRs are not evidence of
+  delivered effort — one issue in this set carried 8,118 lines of churn, 6,706 of
+  it from a PR that was closed and never merged. An unstarted issue has no
+  measurement by definition, and will not until someone does the work.
+
+Keep the two apart when reporting. Measured points describe what a milestone
+cost; judged points describe what is left. Averaging them into one velocity
+figure silently mixes a measurement with a forecast.
+
 ## When the judgments look wrong
 
 Work through it in this order, because the cheapest fixes are also the most common:
