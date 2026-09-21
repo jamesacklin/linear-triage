@@ -349,8 +349,8 @@
     ],
     "_bot_authors_note": "Substring match on the PR review/comment author login. Bot chatter is not review effort, and counting it would reward noisy automation. Linear’s own linkback comment appears on every linked PR.",
     "_not_used_note": "Wall-clock time to merge is reported per PR but never scored on. It measures calendar latency, not effort: on the calibration run a 4,030-line PR merged in 0.0 hours while a 13-line one took 49.",
-    "count_abandoned_churn": false,
-    "_count_abandoned_churn_note": "Churn measures the change that SHIPPED, so a closed-unmerged PR is excluded by default: counting it would call an issue large because it was got wrong four times. The rework still counts as iteration and is reported as abandoned_churn. Set true if velocity is meant to track effort spent rather than change delivered."
+    "count_abandoned_churn": true,
+    "_count_abandoned_churn_note": "true (this config): churn counts every linked PR, so effort spent on attempts that never merged is part of the size. false: churn counts only what shipped, and abandoned work is reported as abandoned_churn but not sized. Either way the rework also counts as iteration. Pick the one that matches what the team means by velocity — change delivered, or effort spent."
   },
   "labels": {
     "_comment": "Real workspaces carry far more labels than are worth judging per issue. Candidates are shortlisted in code before the model sees them; these settings control that shortlist. Tuned against the Tlon team's 99 labels.",

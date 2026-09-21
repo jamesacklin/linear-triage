@@ -405,10 +405,19 @@ Three things decide whether a run is trustworthy, and all three are reported:
   `lookup_failed`, because "we could not ask" and "there is nothing there" are
   different answers.
 
-Churn counts what *shipped*. A closed-unmerged PR is an attempt, not a delivery —
-it is reported as `abandoned_churn` and counted as iteration, so an issue is not
-called large because it was got wrong four times. Flip `count_abandoned_churn` if
-your velocity is meant to track effort spent instead.
+**`count_abandoned_churn` decides what a point means**, and there is no neutral
+setting — pick the one that matches what the team means by velocity:
+
+- **`true`** (this config): every linked PR counts, so an attempt that never
+  merged is part of the size. A point tracks **effort spent**. An issue got wrong
+  four times before it landed measures large, which is true of the effort and not
+  of the change.
+- **`false`**: only merged PRs count. A point tracks **change delivered**, and
+  abandoned work is reported as `abandoned_churn` without being sized.
+
+Either way the rework also lands in `iteration`, so it is never invisible. The
+setting moves real numbers: on the calibration milestone it took one issue from S
+to M — 76 lines shipped after 496 were abandoned across three closed PRs.
 
 ## When the judgments look wrong
 
