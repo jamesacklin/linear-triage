@@ -78,6 +78,9 @@ function main() {
   const minActionable = num("--min-actionable", ec.min_actionable);
   const splitUnknowns = num("--split-unknowns", ec.split.unknowns_min);
   const splitAt = num("--split-at", ec.split.at_index);
+  const autoSuggest = num("--auto-suggest", cfg.confidence.auto_suggest);
+  const needsAttention = num("--needs-attention", cfg.confidence.needs_attention);
+  const uncertainBelow = num("--uncertain-below", cfg.confidence.uncertain_below ?? 0.35);
 
   const input = JSON.parse(readFileSync(0, "utf8"));
   const scaleValues = input.estimation?.values ?? null;
@@ -150,9 +153,60 @@ function main() {
     }
   }
 
+  // Tiering is policy too. The dimension confidences are saved alongside the
+  // scores, so how they are combined into one number — and where the tier cuts
+  // fall — is re-derivable without re-asking anything.
+  const wmean = (conf, w) => {
+    let s = 0, tot = 0;
+    for (const [k, v] of Object.entries(conf)) if (typeof v === "number") { s += w[k] * v; tot += w[k]; }
+    return tot ? s / tot : null;
+  };
+  const retiered = [];
+  for (const p of input.proposals ?? []) {
+    const pd = p.proposed?.dimensions;
+    const ed = p.estimate?.dimensions;
+    if (!pd && !ed) continue;
+
+    const parts = [];
+    if (pd) {
+      const pc = wmean({ severity: pd.severity.confidence, reach: pd.reach.confidence, time_sensitivity: pd.time_sensitivity.confidence }, weights);
+      const kc = p.proposed.work_kind_confidence;
+      const combined = pc == null ? kc : kc == null ? pc : Math.min(pc, kc);
+      if (typeof combined === "number") parts.push(combined);
+    }
+    if (ed) {
+      const ecf = wmean({ scope: ed.scope.confidence, unknowns: ed.unknowns.confidence, coordination: ed.coordination.confidence }, ew);
+      if (typeof ecf === "number") parts.push(ecf);
+    }
+    const confidence = parts.length ? Math.min(...parts) : null;
+
+    const uncertain = Object.entries({
+      ...(pd ? { severity: pd.severity.confidence, reach: pd.reach.confidence, time_sensitivity: pd.time_sensitivity.confidence } : {}),
+      ...(ed ? { scope: ed.scope.confidence, unknowns: ed.unknowns.confidence, coordination: ed.coordination.confidence } : {}),
+    })
+      .filter(([, v]) => typeof v === "number" && v < uncertainBelow)
+      .map(([k, v]) => ({ dimension: k, confidence: Number(v.toFixed(3)) }));
+
+    const tier =
+      confidence == null ? "needs_attention"
+      : confidence >= autoSuggest ? "confident"
+      : confidence >= needsAttention ? "review"
+      : "needs_attention";
+
+    const beforeTier = p.proposed?.review_tier;
+    if (p.proposed) {
+      p.proposed.confidence = confidence == null ? null : Number(confidence.toFixed(3));
+      p.proposed.uncertain_dimensions = uncertain;
+      p.proposed.review_tier = tier;
+    }
+    if (beforeTier && beforeTier !== tier) retiered.push(`${p.identifier}: ${beforeTier} → ${tier}`);
+  }
+
   input.retuned = {
     weights,
     thresholds: t,
+    confidence: { auto_suggest: autoSuggest, needs_attention: needsAttention, uncertain_below: uncertainBelow },
+    retiered_count: retiered.length,
     effort_weights: ew,
     bands: cuts,
     estimate_gates: { min_estimable: minEstimable, min_actionable: minActionable, split_unknowns: splitUnknowns, split_at: splitAt },
@@ -164,6 +218,7 @@ function main() {
     list.length ? `retune: ${list.length} ${label} changed\n  ${list.join("\n  ")}\n` : `retune: no ${label} changed\n`;
   process.stderr.write(report("priorities", changedPriority));
   if (scaleValues) process.stderr.write(report("estimates", changedEstimate));
+  process.stderr.write(report("review tiers", retiered));
 
   process.stdout.write(JSON.stringify(input, null, 2) + "\n");
 }

@@ -24,57 +24,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { normalizeIssue, daysSince, TERMINAL } from "./lib/issue.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// Linear's state `type` is a fixed set; the human-facing `name` is per-team and
-// gets renamed. Keying off names breaks on any team that calls Todo "Ready".
-const TERMINAL = new Set(["completed", "canceled", "cancelled"]);
-const STATE_TYPES = new Set(["triage", "backlog", "unstarted", "started", ...TERMINAL]);
-
+// Field shapes and the terminal-state set live in one place, because reading
+// them wrong fails silently. See scripts/lib/issue.mjs.
 const norm = (s) => String(s ?? "").trim().toLowerCase();
-
-/**
- * The connector returns nested objects; fixtures and hand-written JSON tend to
- * use flat strings. Accept both rather than making the caller reshape, because
- * the reshaping step is where scope bugs hide.
- */
-function normalize(issue) {
-  const pick = (v) => (v && typeof v === "object" ? v.name ?? v.id ?? null : v ?? null);
-  const stateObj = issue.state;
-  const stateType =
-    norm(typeof stateObj === "object" ? stateObj?.type : issue.stateType) ||
-    (STATE_TYPES.has(norm(stateObj)) ? norm(stateObj) : "");
-
-  return {
-    raw: issue,
-    id: issue.id,
-    identifier: issue.identifier ?? issue.id,
-    title: issue.title ?? "",
-    description: issue.description ?? "",
-    stateName: pick(stateObj),
-    stateType,
-    project: pick(issue.project),
-    projectId: issue.project?.id ?? issue.projectId ?? null,
-    milestone: pick(issue.projectMilestone ?? issue.milestone),
-    milestoneId: issue.projectMilestone?.id ?? issue.milestoneId ?? null,
-    cycle: issue.cycle?.number ?? issue.cycle?.name ?? pick(issue.cycle),
-    team: pick(issue.team),
-    assignee: pick(issue.assignee),
-    labels: (issue.labels ?? []).map((l) => (typeof l === "object" ? l.name : l)).filter(Boolean),
-    priority: typeof issue.priority === "number" ? issue.priority : null,
-    estimate: typeof issue.estimate === "number" ? issue.estimate : null,
-    createdAt: issue.createdAt ?? null,
-    updatedAt: issue.updatedAt ?? null,
-    commentCount: (issue.comments ?? []).length,
-  };
-}
-
-const days = (iso) => {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  return Number.isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
-};
+const days = daysSince;
 
 /**
  * Each predicate is named, so an issue that drops out can be attributed to the
@@ -167,6 +124,27 @@ function inferScale(issues, cfg) {
   const scales = cfg.estimation.scales;
   const seen = [...new Set(issues.map((i) => i.estimate).filter((e) => typeof e === "number" && e > 0))].sort((a, b) => a - b);
 
+  // Better signal than the numbers, when it is there: the connector resolves the
+  // estimate's display name alongside its value, and letters settle what values
+  // cannot. {1, 3, 5, 8} is ambiguous between Fibonacci and T-shirt; an "M" is
+  // not. This is the only way to tell those two apart, since T-shirt sizes are
+  // stored as the Fibonacci numbers.
+  const TSHIRT = /^(XS|S|M|L|XL|XXL|XXXL)$/i;
+  const letters = [...new Set(issues.map((i) => i.estimateDisplay).filter((d) => d && TSHIRT.test(d)))];
+  if (letters.length) {
+    const def = scales.tShirt;
+    const extended = letters.some((l) => (def.extended_labels ?? []).some((e) => e.toLowerCase() === l.toLowerCase()));
+    return {
+      determined: true,
+      type: "tShirt",
+      extended,
+      observed_values: seen,
+      observed_labels: letters,
+      note: "Settled by the display names Linear returned, not by the numbers — T-shirt sizes are stored as the Fibonacci values, so letters are the only thing that distinguishes them.",
+      candidates: ["tShirt"],
+    };
+  }
+
   if (!seen.length) {
     return {
       determined: false,
@@ -228,7 +206,7 @@ function warnings(selected, scope) {
   if (noDesc) {
     out.push(`${noDesc} of ${n} issues have an empty description. Jev reads only what is sent, so these will be judged from a title alone and should land in the low-confidence tier.`);
   }
-  const noComments = selected.filter((i) => !i.commentCount).length;
+  const noComments = selected.filter((i) => !i.comments.length).length;
   if (noComments === n && n > 3) {
     out.push("No issue in this set carries comments. If the fetch dropped them, re-fetch with comments: reproduction steps and 'me too' signals usually live there.");
   }
@@ -286,7 +264,7 @@ function main() {
 
   const input = JSON.parse(readFileSync(0, "utf8"));
   const scope = { ...(input.scope ?? {}), ...parseArgs(argv) };
-  const all = (input.issues ?? []).map(normalize);
+  const all = (input.issues ?? []).map(normalizeIssue);
 
   const preds = buildPredicates(scope);
   const excluded = Object.fromEntries(preds.map((p) => [p.name, 0]));

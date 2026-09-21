@@ -20,6 +20,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { normalizeIssue } from "./lib/issue.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENDPOINT = process.env.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai/v1/systemone";
@@ -140,17 +141,17 @@ async function systemOne(body, { retries = 4 } = {}) {
  * judgment depends on has to be here — including comments, which is usually
  * where the reproduction steps and the "me too" signal actually live.
  */
-function issueState(issue) {
+function issueState(n, raw) {
   return {
     issue: {
-      title: issue.title ?? "",
-      description: issue.description ?? "",
-      comments: (issue.comments ?? []).map((c) => c.body ?? c).slice(0, 20),
-      reporter: issue.reporter ?? issue.creator ?? null,
-      current_labels: issue.labels ?? [],
-      team: issue.team ?? null,
-      created_at: issue.createdAt ?? null,
-      updated_at: issue.updatedAt ?? null,
+      title: n.title,
+      description: n.description,
+      comments: n.comments.slice(0, 20),
+      reporter: raw.reporter ?? raw.creator ?? null,
+      current_labels: n.labels,
+      team: n.team,
+      created_at: n.createdAt,
+      updated_at: n.updatedAt,
     },
   };
 }
@@ -512,12 +513,8 @@ function composeEstimate(cfg, answers, scale) {
   const value = scale.values[index];
   const display = scale.labels ? scale.labels[index] : String(value);
 
-  // A Noul has no separate confidence, but distance from 0.5 carries the same
-  // information: 0.5 is "genuinely undecided", not "medium". Fold that in so an
-  // undecided "can this be sized at all?" suppresses the tier.
   const estimable = answers.is_estimable?.noul;
   const actionable = answers.is_actionable?.noul;
-  const nounConfidence = (n) => (typeof n === "number" ? Math.abs(n - 0.5) * 2 : null);
 
   const blockers = [];
   if (typeof estimable === "number" && estimable < ec.min_estimable) {
@@ -536,12 +533,18 @@ function composeEstimate(cfg, answers, scale) {
     unknowns: answers.effort_unknowns?.confidence,
     coordination: answers.effort_coordination?.confidence,
   };
-  const effortConf = weightedConfidence(dimConf, ec.weights);
-  const estimableConf = nounConfidence(estimable);
-  const confidence =
-    effortConf == null ? estimableConf
-    : estimableConf == null ? effortConf
-    : Math.min(effortConf, estimableConf);
+  // Confidence comes from the three scored dimensions only, weighted the same
+  // way they are combined — exactly as priority confidence works.
+  //
+  // `is_estimable` is deliberately NOT folded in. It is a gate: it decides
+  // whether to publish a number at all. Letting it also depress confidence
+  // double-counts it, and it double-counts something structural — "is there
+  // enough here to size this?" is an inherently fuzzy question, so the Noul
+  // sits near 0.5 on a large share of perfectly ordinary issues. On the first
+  // real run that pushed 30 of 32 issues into the bottom tier and left none
+  // confident, which is the exact failure this file warns about for priority:
+  // a tier everything lands in tells the reviewer nothing.
+  const confidence = weightedConfidence(dimConf, ec.weights);
 
   const recommendation = blockers.length ? "refine" : shouldSplit ? "split" : "estimate";
 
@@ -608,22 +611,30 @@ async function triageIssues(input, cfg, opts) {
   const dryRuns = [];
 
   const proposals = await mapPool(issues, 6, async (issue) => {
+    const n = normalizeIssue(issue);
     const base = {
-      id: issue.id,
-      identifier: issue.identifier ?? issue.id,
-      title: issue.title,
-      url: issue.url ?? null,
+      id: n.id,
+      identifier: n.identifier,
+      title: n.title,
+      url: n.url,
       current: {
-        priority: issue.priority ?? null,
-        estimate: issue.estimate ?? null,
-        labels: issue.labels ?? [],
-        state: issue.state ?? null,
+        priority: n.priority,
+        priority_name: n.priorityName,
+        estimate: n.estimate,
+        estimate_display: n.estimateDisplay,
+        labels: n.labels,
+        state: n.stateName,
+        state_type: n.stateType,
+        milestone: n.milestone,
       },
     };
 
     // Block before spending. An issue a person already sized does not need an
     // effort judgment unless the user explicitly asked for a re-estimate.
-    const alreadyEstimated = typeof issue.estimate === "number";
+    // This reads the NORMALIZED value: the connector returns {value, name}, so
+    // a typeof check against the raw field is always false and silently
+    // re-judges every already-sized issue.
+    const alreadyEstimated = n.estimate != null;
     const wantEstimate =
       Boolean(scale) &&
       opts.only !== "priority" &&
@@ -636,17 +647,17 @@ async function triageIssues(input, cfg, opts) {
 
     const skippedEstimate =
       scale && !wantEstimate && opts.only !== "priority"
-        ? { skipped: "already_estimated", current: issue.estimate, note: "Pass --reestimate to propose a replacement." }
+        ? { skipped: "already_estimated", current: n.estimate, display: n.estimateDisplay, note: "Pass --reestimate to propose a replacement." }
         : null;
 
     if (!tasks.priority && !tasks.estimate) {
-      return { ...base, proposed: {}, estimate: skippedEstimate, staleness: staleness(issue, cfg) };
+      return { ...base, proposed: {}, estimate: skippedEstimate, staleness: staleness(n, cfg) };
     }
 
     try {
-      const plan = tasks.labels ? planLabels(issue, labels, cfg) : { candidates: [], groups: [] };
+      const plan = tasks.labels ? planLabels(n, labels, cfg) : { candidates: [], groups: [] };
       const questions = clean(buildQuestions(cfg, plan, tasks));
-      const request = { model: cfg.model, state: issueState(issue), questions };
+      const request = { model: cfg.model, state: issueState(n, issue), questions };
 
       if (opts.dryRun) {
         dryRuns.push({ identifier: base.identifier, question_count: Object.keys(questions).length, request });
@@ -695,7 +706,7 @@ async function triageIssues(input, cfg, opts) {
             : "needs_attention",
         },
         ...(estimate ? { estimate } : {}),
-        staleness: staleness(issue, cfg),
+        staleness: staleness(n, cfg),
       };
     } catch (err) {
       return { ...base, error: String(err.message ?? err) };

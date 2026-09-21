@@ -65,6 +65,12 @@ So the scale has to come from somewhere else:
    this and reports `estimation_hint`. It refuses to commit when the observed
    values fit more than one scale, which is common — `{1, 2, 3}` fits three of
    the four.
+
+   The strongest signal is not the numbers: the connector resolves the estimate's
+   **display name** alongside its value (`{value: 3, name: "M"}`), and letters
+   settle what values cannot. `{1, 2, 3, 5, 8}` is ambiguous between Fibonacci
+   and T-shirt — those scales share their numbers by construction — but a single
+   `"M"` decides it outright.
 2. Ask the user. It is in Team Settings → General → Estimates.
 
 Do not default to Fibonacci because it is the most popular. Proposing a 5 to a
@@ -111,15 +117,56 @@ Discover the exact tool names at runtime rather than assuming them — the
 `claude.ai Linear` connector's surface changes. Look for the list/search/update
 issue tools and read their schemas before the first call.
 
-Three practical points:
+### The field shapes are not the ones you would guess
 
-- List endpoints paginate and often omit `description` and comments. Those are
-  exactly the fields the judgments depend on, so fetch issues individually, or
-  with a query that includes them, before judging.
-- The connector returns nested objects (`state: {name, type}`, `project: {id,
-  name}`) while fixtures and hand-written JSON tend to be flat. `scope.mjs`
-  accepts either, because a reshaping step between fetch and filter is exactly
-  where scope bugs hide.
+Verified against a real workspace, because guessing these wrong fails *silently*:
+
+| Field | What `list_issues` actually returns |
+| --- | --- |
+| `id` | `"TLON-6526"` — the identifier. There is no separate `identifier` field |
+| `status` | `"In Progress"` — the NAME, a flat string |
+| `statusType` | `"started"` — the type, a flat string |
+| `priority` | `{value: 3, name: "Medium"}` — an object, not a number |
+| `estimate` | `{value: 3, name: "M"}` — an object; the key is **absent** when unestimated |
+| `projectMilestone` | `{id, name}`, or absent |
+| `team`, `project` | flat strings |
+| `labels` | flat strings |
+
+Two of these cause bugs that no error message will ever point at:
+
+- **`priority` read as a number is never `0`**, so an "unprioritized" filter
+  matches nothing and every issue looks like it already has a priority.
+- **`estimate` read with `typeof x === "number"` is always false**, so every
+  issue looks unestimated and the "leave existing estimates alone" guard never
+  fires — you pay to re-judge work somebody already sized.
+
+`scripts/lib/issue.mjs` normalizes both these shapes and the flatter ones that
+fixtures use, in one place, for exactly this reason.
+
+### `description` is truncated to 500 characters
+
+`list_issues` does not omit descriptions — it **truncates them at 500 chars**,
+silently and with no marker. `get_issue` returns the full text, one issue per
+call. On a real run the difference was stark: a spec that is 15,000 characters in
+Linear arrives as 500, losing the entire design, the task list, and the evidence.
+
+So a scoped pass has a real choice to make, and it should be made out loud:
+
+- Accept truncated evidence, and expect the confidence tiers to reflect it.
+- Or pay one `get_issue` per issue for full fidelity.
+
+`list_issues` returns **no comments at all**, under any `fields` selection —
+`list_comments` is a separate call per issue. `scope.mjs` warns when nothing in
+the selection carries comments, because that is usually a fetch that dropped them
+rather than a queue with none.
+
+### Other practical points
+
+- **`duplicate` is a status type**, alongside `completed` and `canceled`, and it
+  is terminal — the issue was closed as a copy of another. A terminal-state
+  filter that only knows about completed/canceled will re-prioritize duplicates.
+- Results paginate with a `cursor`; `hasNextPage` tells you to keep going. A
+  365-issue project came back as 250 + 115.
 - `https://mcp.linear.app/sse` is retired and returns 404. The working endpoint
   is `https://mcp.linear.app/mcp`.
 

@@ -240,6 +240,15 @@ priority, then takes the lower of that, the work-kind confidence, and — when t
 pass sized anything — the estimate confidence. An issue is only "confident" if
 everything the pass decided about it was.
 
+**Only scored dimensions feed confidence.** The Noul gates — `is_estimable`,
+`is_actionable` — decide whether to publish a number; they must not also depress
+the tier. Folding one in double-counts it, and double-counts something
+structural: "is there enough here to size this?" is an inherently fuzzy question,
+so the answer sits near 0.5 on a large share of perfectly ordinary issues. The
+first real run did exactly this and put 30 of 32 issues in the bottom tier with
+none confident — the same failure a plain `min()` causes, arriving by a different
+route. Gates gate; scores score.
+
 A plain `min()` across every dimension sounds more conservative and is worse: one
 structurally uncertain dimension drags every issue into the bottom tier, and a
 tier that everything lands in tells the reviewer nothing. Dimensions that really

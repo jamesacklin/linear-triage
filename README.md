@@ -73,6 +73,15 @@ any milestone" is the clearest case — there is no filter for the *absence* of 
 milestone — so the range is fetched wide and partitioned locally. Completed and
 canceled issues are dropped unless you ask for them.
 
+## A note on fetch fidelity
+
+`list_issues` truncates `description` to 500 characters and returns no comments.
+`get_issue` and `list_comments` return the full text, one call each. A scoped
+pass therefore chooses between truncated evidence and one-call-per-issue
+fidelity — `scope.mjs` warns when the selection looks thin so the choice is
+explicit rather than accidental. See `references/linear.md` for the full set of
+connector field shapes, which are not the ones you would guess.
+
 ## How priority is derived
 
 Rather than asking "what priority is this?", three dimensions are scored
