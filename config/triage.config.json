@@ -1,6 +1,6 @@
 {
   "model": "jev-latest",
-  "_comment": "Tune this file, not the code. Level descriptions are sent to Jev verbatim as criteria, so rewording them changes the judgments. Weights and thresholds are applied in code after the model answers, so changing them re-derives priority WITHOUT a new API call (see 'Retuning is free' in SKILL.md).",
+  "_comment": "Tune this file, not the code. Level descriptions are sent to Jev verbatim as criteria, so rewording them changes the judgments. Weights, thresholds, and estimate bands are applied in code after the model answers, so changing them re-derives priority and estimates WITHOUT a new API call (see 'Retuning is free' in SKILL.md).",
   "dimensions": {
     "severity": {
       "instructions": {
@@ -63,7 +63,7 @@
           ]
         },
         {
-          "what": "Anyone who uses a common feature, or an unknown population that the evidence does not bound \u2014 few observed occurrences but no stated reason others are safe.",
+          "what": "Anyone who uses a common feature, or an unknown population that the evidence does not bound — few observed occurrences but no stated reason others are safe.",
           "examples": [
             "one crash report in a shared code path",
             "a single 503 with no explanation of why it is isolated"
@@ -121,6 +121,145 @@
     "duplicate_candidate_limit": 8,
     "duplicate_threshold": 1.5
   },
+  "effort": {
+    "_comment": "Sizing dimensions, scored independently and combined in code exactly as the priority dimensions are. Asking 'how many points is this?' directly returns a number you cannot argue with; three dimensions return evidence you can re-band when the team's velocity changes. Levels must describe situations a reader could tell apart without seeing their neighbours — see 'When the judgments look wrong' in SKILL.md.",
+    "scope": {
+      "instructions": {
+        "question": "How much of the product has to change to close this?",
+        "focus": "Judge the extent of the change, not how hard it is to work out. A sweeping but mechanical rename is wide; a one-line fix that takes a week to find is narrow. Difficulty is asked about separately."
+      },
+      "criteria": [
+        {
+          "what": "One contained edit in a single place, with no decisions attached to it.",
+          "examples": [
+            "fix a string",
+            "change a timeout value",
+            "add a missing null check"
+          ]
+        },
+        {
+          "what": "One component or one flow, end to end. Several edits, all in the same area, all identifiable up front.",
+          "examples": [
+            "add a field to an existing form and persist it",
+            "fix a broken pagination control"
+          ]
+        },
+        {
+          "what": "Several areas have to change together, or something new has to be built and wired into what already exists.",
+          "examples": [
+            "add CSV export: new endpoint, new UI, new permission check",
+            "thread a new setting through client and server"
+          ]
+        },
+        {
+          "what": "Structural. A schema, protocol, or public interface changes, or existing data has to be migrated, so the full set of edits cannot be listed before starting.",
+          "examples": [
+            "change the sync protocol",
+            "backfill and re-key an existing table",
+            "replace the auth layer"
+          ]
+        }
+      ]
+    },
+    "unknowns": {
+      "instructions": {
+        "question": "How much has to be figured out before someone could start writing the fix?",
+        "focus": "Judge what is not yet known, separately from how much code changes. An unreproduced crash is full of unknowns even if the fix turns out to be one line."
+      },
+      "criteria": [
+        {
+          "what": "Nothing to work out. The change itself is stated or obvious from the report, and someone could start immediately."
+        },
+        {
+          "what": "The approach is clear; the details are not. Which call, which place, which edge cases — all answerable while working, without a separate investigation."
+        },
+        {
+          "what": "The cause or the design has to be investigated first, and that investigation is bounded: there is a clear place to start looking and it is likely to find an answer.",
+          "examples": [
+            "reproducible crash with no obvious cause",
+            "a design that has to be chosen before building"
+          ]
+        },
+        {
+          "what": "It is not yet known whether this can be solved as framed. The work could turn out to be far larger than it looks, or turn out not to be the real problem at all.",
+          "examples": [
+            "intermittent failure nobody has reproduced",
+            "a fix that may require a dependency to change first"
+          ]
+        }
+      ]
+    },
+    "coordination": {
+      "instructions": {
+        "question": "How much does finishing this depend on people or systems outside the person doing the work?",
+        "focus": "Judge dependency, not team size. Work that needs a design, another team's deploy, or a third party's change is coordinated even when the code is trivial."
+      },
+      "criteria": [
+        {
+          "what": "One person can carry this from start to done on their own, with ordinary review."
+        },
+        {
+          "what": "Something is needed from someone else along the way — a design, a decision, a review from another team — but the work can start without it.",
+          "examples": [
+            "needs copy from design before it ships",
+            "needs a product decision on the edge case"
+          ]
+        },
+        {
+          "what": "Cannot be finished without a party outside this team, a sequenced deploy or migration, or a dependency that does not exist yet.",
+          "examples": [
+            "blocked on a vendor fix",
+            "requires a coordinated client and server release",
+            "needs a data migration run in production"
+          ]
+        }
+      ]
+    }
+  },
+  "estimation": {
+    "_comment": "Everything here is policy applied AFTER the model answers, so 'our 5s are too big' is a band change and a retune.mjs run, not a re-judgment. Linear's scales are non-linear, so mapping effort to a value is a band lookup, never arithmetic: 8 on the Fibonacci scale is not twice the effort of 4.",
+    "weights": {
+      "_comment": "Must sum to 1.0. Scope dominates because it is the part a reviewer can check. Raise unknowns if your team's estimates keep getting blown out by investigation rather than by volume.",
+      "scope": 0.5,
+      "unknowns": 0.3,
+      "coordination": 0.2
+    },
+    "bands": {
+      "_comment": "Effort (0..1) to a POSITION on the team's scale, not to a value — index 0 is the smallest value the team uses, whatever it happens to be. Upper bound of each band, checked top down. Deliberately stops at index 4: the extended values (Fibonacci 13/21, exponential 32/64) exist for work that should be split instead, and this skill proposes the split rather than the number.",
+      "cuts": [
+        { "below": 0.12, "index": 0 },
+        { "below": 0.30, "index": 1 },
+        { "below": 0.52, "index": 2 },
+        { "below": 0.74, "index": 3 },
+        { "below": 1.01, "index": 4 }
+      ]
+    },
+    "min_estimable": 0.5,
+    "_min_estimable_note": "Below this the estimate is withheld rather than guessed. A fabricated number is worse than an empty field, because Linear feeds estimates into cycle capacity and project graphs where nobody can see it was a shrug.",
+    "min_actionable": 0.4,
+    "_min_actionable_note": "If nobody can tell what 'done' means, the size of getting there is not a real quantity either.",
+    "split": {
+      "_comment": "Linear's own guidance: a large estimate usually means uncertainty rather than volume, and the right move is to break the issue up. When the work lands in the top band AND the unknowns are high, propose a split instead of a number.",
+      "at_index": 4,
+      "unknowns_min": 0.6
+    },
+    "propose_zero": false,
+    "_propose_zero_note": "An explicit 0 asserts the work costs nothing, which is a human's call and not something to infer from a description. Left unestimated instead, even on teams that allow zero.",
+    "reestimate_existing": false,
+    "_reestimate_existing_note": "By default only unestimated issues get a proposal. A number already in the field usually came from a person who knew more than the issue text does; overwriting it silently is the expensive mistake. Ask for a re-estimate explicitly to override.",
+    "scales": {
+      "_comment": "From Linear's estimate docs. T-shirt sizes are stored as the Fibonacci numbers and only displayed as letters. Zero is a separate 'allow zero estimates' setting and is never part of the ordered scale.",
+      "exponential": { "values": [1, 2, 4, 8, 16], "extended": [32, 64] },
+      "fibonacci": { "values": [1, 2, 3, 5, 8], "extended": [13, 21] },
+      "linear": { "values": [1, 2, 3, 4, 5], "extended": [6, 7] },
+      "tShirt": {
+        "values": [1, 2, 3, 5, 8],
+        "extended": [13, 21],
+        "labels": ["XS", "S", "M", "L", "XL"],
+        "extended_labels": ["XXL", "XXXL"]
+      }
+    }
+  },
   "labels": {
     "_comment": "Real workspaces carry far more labels than are worth judging per issue. Candidates are shortlisted in code before the model sees them; these settings control that shortlist. Tuned against the Tlon team's 99 labels.",
     "max_candidates": 12,
@@ -152,6 +291,6 @@
         "min": 0.6
       }
     },
-    "_group_gates_note": "Ask the group question speculatively, then keep the answer only when the gating label also scored high. A forced Choice always picks something, so the gate \u2014 not the model \u2014 decides whether the group applies at all."
+    "_group_gates_note": "Ask the group question speculatively, then keep the answer only when the gating label also scored high. A forced Choice always picks something, so the gate — not the model — decides whether the group applies at all."
   }
 }

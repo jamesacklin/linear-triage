@@ -9,9 +9,12 @@
  * propose-then-confirm loop safe and the judgments testable offline.
  *
  *   echo '{"issues":[...],"labels":[...]}' | node scripts/judge.mjs > proposals.json
+ *   node scripts/scope.mjs --milestone Beta < fetched.json | node scripts/judge.mjs
+ *   node scripts/judge.mjs --only estimate < scoped.json
  *   node scripts/judge.mjs --mode duplicates < pairs.json
+ *   node scripts/judge.mjs --dry-run < scoped.json      # show the requests, send nothing
  *
- * Requires TYPESAFE_API_KEY.
+ * Requires TYPESAFE_API_KEY (except with --dry-run).
  */
 
 import { readFileSync } from "node:fs";
@@ -73,6 +76,7 @@ const STOP = new Set(
 );
 
 const slug = (s) => s.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase();
+const lower = (s) => String(s ?? "").trim().toLowerCase();
 
 function loadConfig(path) {
   const raw = JSON.parse(readFileSync(path ?? join(HERE, "..", "config", "triage.config.json"), "utf8"));
@@ -80,6 +84,13 @@ function loadConfig(path) {
   const sum = w.severity + w.reach + w.time_sensitivity;
   if (Math.abs(sum - 1) > 1e-6) {
     throw new Error(`weights must sum to 1.0, got ${sum}. Fix config/triage.config.json.`);
+  }
+  const e = raw.estimation?.weights;
+  if (e) {
+    const esum = e.scope + e.unknowns + e.coordination;
+    if (Math.abs(esum - 1) > 1e-6) {
+      throw new Error(`estimation.weights must sum to 1.0, got ${esum}. Fix config/triage.config.json.`);
+    }
   }
   return raw;
 }
@@ -145,15 +156,35 @@ function issueState(issue) {
 }
 
 /**
- * All questions for one issue go in a single request. They are independent, so
- * the service answers them in parallel and we pay for the state once instead of
- * once per question.
+ * Resolve the team's estimate scale into an ordered list of values.
  *
- * Some questions are speculative — has_repro only means something if the issue
- * is a defect. We ask anyway and let code decide what to consume, which is
- * cheaper than a second round trip and keeps the premise explicit in the
- * wording so the model is not guessing at context it cannot see.
+ * The scale has to come from outside this script: the Linear connector does not
+ * expose `issueEstimationType`, so it is either inferred from estimates already
+ * on the team's issues (scope.mjs does this) or supplied by the user. Hardcoding
+ * one would be the same mistake as shipping a fixed list of labels.
  */
+function resolveScale(estimation, cfg) {
+  if (!estimation) return null;
+  const type = estimation.type ?? estimation.scale;
+  if (!type || ["notused", "none", "disabled", "off"].includes(lower(type))) return null;
+
+  const scales = cfg.estimation?.scales ?? {};
+  const key = Object.keys(scales).find((k) => !k.startsWith("_") && lower(k) === lower(type));
+  if (!key) {
+    throw new Error(
+      `Unknown estimate scale "${type}". Linear's scales are: ${Object.keys(scales).filter((k) => !k.startsWith("_")).join(", ")}.`,
+    );
+  }
+  const def = scales[key];
+  const extended = Boolean(estimation.extended);
+  return {
+    type: key,
+    extended,
+    values: extended ? [...def.values, ...(def.extended ?? [])] : [...def.values],
+    labels: def.labels ? (extended ? [...def.labels, ...(def.extended_labels ?? [])] : [...def.labels]) : null,
+  };
+}
+
 /**
  * Decide which labels are worth asking about for a given issue.
  *
@@ -233,25 +264,38 @@ function planLabels(issue, labels, cfg) {
   return { candidates, groups };
 }
 
-function buildQuestions(cfg, plan) {
-  const d = clean(cfg.dimensions);
-  const questions = {
-    work_kind: {
+/**
+ * All questions for one issue go in a single request. They are independent, so
+ * the service answers them in parallel and we pay for the state once instead of
+ * once per question. Sizing and prioritizing the same issue is therefore one
+ * request, not two — which is the whole reason a combined pass is worth doing.
+ *
+ * Some questions are speculative — has_repro only means something if the issue
+ * is a defect. We ask anyway and let code decide what to consume, which is
+ * cheaper than a second round trip and keeps the premise explicit in the
+ * wording so the model is not guessing at context it cannot see.
+ */
+function buildQuestions(cfg, plan, tasks) {
+  const questions = {};
+
+  if (tasks.priority) {
+    const d = clean(cfg.dimensions);
+    questions.work_kind = {
       type: "choice",
       instructions: {
         question: "What kind of work is this issue asking for?",
         focus: "Judge what someone would have to do to close it, not the tone of the report.",
       },
       criteria: WORK_KINDS,
-    },
-    severity: { type: "score", instructions: d.severity.instructions, criteria: d.severity.criteria },
-    reach: { type: "score", instructions: d.reach.instructions, criteria: d.reach.criteria },
-    time_sensitivity: {
+    };
+    questions.severity = { type: "score", instructions: d.severity.instructions, criteria: d.severity.criteria };
+    questions.reach = { type: "score", instructions: d.reach.instructions, criteria: d.reach.criteria };
+    questions.time_sensitivity = {
       type: "score",
       instructions: d.time_sensitivity.instructions,
       criteria: d.time_sensitivity.criteria,
-    },
-    has_repro: {
+    };
+    questions.has_repro = {
       type: "noul",
       instructions: {
         question: "If this describes a defect, does it contain enough detail for someone else to reproduce it without asking the reporter a question?",
@@ -261,19 +305,49 @@ function buildQuestions(cfg, plan) {
         true: "A reader could attempt reproduction today from what is written here.",
         false: "A reader would have to go back to the reporter first, or this is not a defect report.",
       },
-    },
-    is_actionable: {
+    };
+  }
+
+  if (tasks.estimate) {
+    const e = clean(cfg.effort);
+    questions.effort_scope = { type: "score", instructions: e.scope.instructions, criteria: e.scope.criteria };
+    questions.effort_unknowns = { type: "score", instructions: e.unknowns.instructions, criteria: e.unknowns.criteria };
+    questions.effort_coordination = {
+      type: "score",
+      instructions: e.coordination.instructions,
+      criteria: e.coordination.criteria,
+    };
+    // Separate from effort_unknowns on purpose. High unknowns means the work is
+    // risky and should be sized larger; not estimable means no number would mean
+    // anything yet, which is a reason to withhold rather than to inflate.
+    questions.is_estimable = {
       type: "noul",
       instructions: {
-        question: "Could someone pick this up and know what 'done' looks like?",
-        focus: "Judge whether the desired end state is identifiable, not whether the work is easy or the solution is specified.",
+        question: "Is there enough here to size the work, even roughly?",
+        focus: "Judge whether a defensible guess is possible from what is written, not whether the work is small. An issue can be large and perfectly estimable, or tiny and impossible to size because nobody knows what it involves yet.",
       },
       criteria: {
-        true: "The desired outcome is clear enough to start work and recognise completion.",
-        false: "Too vague, too broad, or missing the point of what is actually wanted.",
+        true: "Someone familiar with the product could put a rough size on this and defend it.",
+        false: "Any number would be a shrug — the size depends entirely on answers nobody has yet.",
       },
+    };
+  }
+
+  // Asked for both tasks: 'is this actionable' bears on whether to prioritize it
+  // and on whether a size means anything.
+  questions.is_actionable = {
+    type: "noul",
+    instructions: {
+      question: "Could someone pick this up and know what 'done' looks like?",
+      focus: "Judge whether the desired end state is identifiable, not whether the work is easy or the solution is specified.",
+    },
+    criteria: {
+      true: "The desired outcome is clear enough to start work and recognise completion.",
+      false: "Too vague, too broad, or missing the point of what is actually wanted.",
     },
   };
+
+  if (!tasks.labels) return questions;
 
   // One Noul per *candidate* label rather than one Choice over all of them:
   // ungrouped labels are not mutually exclusive, and a Choice would force a
@@ -317,14 +391,23 @@ function buildQuestions(cfg, plan) {
   return questions;
 }
 
-function compose(cfg, answers, plan) {
-  // Scores come back as a probability-weighted mean of level indices, so the
-  // top index is levels-1, not levels.
-  const norm = (a, levels) => (a && typeof a.score === "number" ? a.score / (levels - 1) : 0);
+// Scores come back as a probability-weighted mean of level indices, so the top
+// index is levels-1, not levels.
+const normScore = (a, levels) => (a && typeof a.score === "number" ? a.score / (levels - 1) : 0);
 
-  const severity = norm(answers.severity, cfg.dimensions.severity.criteria.length);
-  const reach = norm(answers.reach, cfg.dimensions.reach.criteria.length);
-  const timeSensitivity = norm(answers.time_sensitivity, cfg.dimensions.time_sensitivity.criteria.length);
+/** Weight-aware mean of whichever dimension confidences actually came back. */
+function weightedConfidence(confidences, weights) {
+  let sum = 0, wsum = 0;
+  for (const [k, v] of Object.entries(confidences)) {
+    if (typeof v === "number") { sum += weights[k] * v; wsum += weights[k]; }
+  }
+  return wsum ? sum / wsum : null;
+}
+
+function composePriority(cfg, answers, plan, tasks) {
+  const severity = normScore(answers.severity, cfg.dimensions.severity.criteria.length);
+  const reach = normScore(answers.reach, cfg.dimensions.reach.criteria.length);
+  const timeSensitivity = normScore(answers.time_sensitivity, cfg.dimensions.time_sensitivity.criteria.length);
 
   const urgency =
     cfg.weights.severity * severity +
@@ -338,39 +421,42 @@ function compose(cfg, answers, plan) {
   else if (urgency >= t.medium) priority = LINEAR_PRIORITY.medium;
 
   const suggestedLabels = [];
-  for (const label of plan.candidates) {
-    const ans = answers[`label_${slug(label.name)}`];
-    if (typeof ans?.noul === "number" && ans.noul >= (cfg.labels?.apply_threshold ?? 0.6)) {
-      suggestedLabels.push({ name: label.name, probability: round(ans.noul) });
-    }
-  }
-  suggestedLabels.sort((a, b) => b.probability - a.probability);
-
-  // work_kind drives the kind labels so the two cannot contradict each other.
-  const kindLabel = (cfg.labels?.kind_label_map ?? {})[answers.work_kind?.choice];
-  if (kindLabel) {
-    suggestedLabels.unshift({ name: kindLabel, probability: round(answers.work_kind?.confidence), from: "work_kind" });
-  }
-
-  // A Choice always returns something, so asking "which reliability phase?"
-  // about an unrelated chore still yields a phase. The gate decides whether the
-  // group applies at all; the model only decides which value within it.
-  const gates = cfg.labels?.group_gates ?? {};
   const groupChoices = [];
   const groupsSkipped = [];
-  for (const { group } of plan.groups) {
-    const ans = answers[`group_${slug(group.name)}`];
-    if (!ans?.choice || ans.choice === "__none") continue;
-    const gate = gates[group.name];
-    if (gate) {
-      const gateAns = answers[`label_${slug(gate.label)}`];
-      const gateProb = typeof gateAns?.noul === "number" ? gateAns.noul : 0;
-      if (gateProb < (gate.min ?? 0.6)) {
-        groupsSkipped.push({ group: group.name, would_have_been: ans.choice, gate: gate.label, gate_probability: round(gateProb) });
-        continue;
+
+  if (tasks.labels) {
+    for (const label of plan.candidates) {
+      const ans = answers[`label_${slug(label.name)}`];
+      if (typeof ans?.noul === "number" && ans.noul >= (cfg.labels?.apply_threshold ?? 0.6)) {
+        suggestedLabels.push({ name: label.name, probability: round(ans.noul) });
       }
     }
-    groupChoices.push({ group: group.name, value: ans.choice, confidence: round(ans.confidence) });
+    suggestedLabels.sort((a, b) => b.probability - a.probability);
+
+    // work_kind drives the kind labels so the two cannot contradict each other.
+    const kindLabel = (cfg.labels?.kind_label_map ?? {})[answers.work_kind?.choice];
+    if (kindLabel) {
+      suggestedLabels.unshift({ name: kindLabel, probability: round(answers.work_kind?.confidence), from: "work_kind" });
+    }
+
+    // A Choice always returns something, so asking "which reliability phase?"
+    // about an unrelated chore still yields a phase. The gate decides whether the
+    // group applies at all; the model only decides which value within it.
+    const gates = cfg.labels?.group_gates ?? {};
+    for (const { group } of plan.groups) {
+      const ans = answers[`group_${slug(group.name)}`];
+      if (!ans?.choice || ans.choice === "__none") continue;
+      const gate = gates[group.name];
+      if (gate) {
+        const gateAns = answers[`label_${slug(gate.label)}`];
+        const gateProb = typeof gateAns?.noul === "number" ? gateAns.noul : 0;
+        if (gateProb < (gate.min ?? 0.6)) {
+          groupsSkipped.push({ group: group.name, would_have_been: ans.choice, gate: gate.label, gate_probability: round(gateProb) });
+          continue;
+        }
+      }
+      groupChoices.push({ group: group.name, value: ans.choice, confidence: round(ans.confidence) });
+    }
   }
 
   // Tier on the confidence that actually drove the outcome. Taking a plain
@@ -382,23 +468,12 @@ function compose(cfg, answers, plan) {
     reach: answers.reach?.confidence,
     time_sensitivity: answers.time_sensitivity?.confidence,
   };
-  let weighted = 0, wsum = 0;
-  for (const [k, v] of Object.entries(dimConf)) {
-    if (typeof v === "number") { weighted += cfg.weights[k] * v; wsum += cfg.weights[k]; }
-  }
-  const priorityConf = wsum ? weighted / wsum : null;
+  const priorityConf = weightedConfidence(dimConf, cfg.weights);
   const kindConf = answers.work_kind?.confidence;
   const confidence =
     priorityConf == null ? kindConf ?? null
     : kindConf == null ? priorityConf
     : Math.min(priorityConf, kindConf);
-
-  // Name the shaky dimensions rather than burying them in one number, so the
-  // reviewer knows *what* to check instead of just that something is off.
-  const uncertainBelow = cfg.confidence.uncertain_below ?? 0.35;
-  const uncertain = Object.entries(dimConf)
-    .filter(([, v]) => typeof v === "number" && v < uncertainBelow)
-    .map(([k, v]) => ({ dimension: k, confidence: round(v) }));
 
   return {
     work_kind: answers.work_kind?.choice ?? null,
@@ -414,17 +489,81 @@ function compose(cfg, answers, plan) {
     labels: suggestedLabels,
     label_groups: groupChoices,
     label_groups_gated_out: groupsSkipped,
-    hygiene: {
-      has_repro: round(answers.has_repro?.noul),
-      is_actionable: round(answers.is_actionable?.noul),
-    },
     confidence: round(confidence),
-    uncertain_dimensions: uncertain,
-    review_tier:
-      confidence == null ? "needs_attention"
-      : confidence >= cfg.confidence.auto_suggest ? "confident"
-      : confidence >= cfg.confidence.needs_attention ? "review"
-      : "needs_attention",
+    dimension_confidences: dimConf,
+  };
+}
+
+/** Effort (0..1) to a position on the team's scale. See the config comment: the
+ * scales are non-linear, so this is a band lookup and never a rescale. */
+function bandIndex(effort, cuts) {
+  for (const c of cuts) if (effort < c.below) return c.index;
+  return cuts[cuts.length - 1].index;
+}
+
+function composeEstimate(cfg, answers, scale) {
+  const ec = cfg.estimation;
+  const scopeN = normScore(answers.effort_scope, cfg.effort.scope.criteria.length);
+  const unknownsN = normScore(answers.effort_unknowns, cfg.effort.unknowns.criteria.length);
+  const coordN = normScore(answers.effort_coordination, cfg.effort.coordination.criteria.length);
+
+  const effort = ec.weights.scope * scopeN + ec.weights.unknowns * unknownsN + ec.weights.coordination * coordN;
+  const index = Math.min(bandIndex(effort, ec.bands.cuts), scale.values.length - 1);
+  const value = scale.values[index];
+  const display = scale.labels ? scale.labels[index] : String(value);
+
+  // A Noul has no separate confidence, but distance from 0.5 carries the same
+  // information: 0.5 is "genuinely undecided", not "medium". Fold that in so an
+  // undecided "can this be sized at all?" suppresses the tier.
+  const estimable = answers.is_estimable?.noul;
+  const actionable = answers.is_actionable?.noul;
+  const nounConfidence = (n) => (typeof n === "number" ? Math.abs(n - 0.5) * 2 : null);
+
+  const blockers = [];
+  if (typeof estimable === "number" && estimable < ec.min_estimable) {
+    blockers.push({ reason: "not_estimable", probability: round(estimable), threshold: ec.min_estimable });
+  }
+  if (typeof actionable === "number" && actionable < ec.min_actionable) {
+    blockers.push({ reason: "not_actionable", probability: round(actionable), threshold: ec.min_actionable });
+  }
+  // Linear's own guidance: a top-of-scale estimate usually reports uncertainty
+  // rather than volume, and the useful response is to break the issue up.
+  const shouldSplit =
+    index >= (ec.split?.at_index ?? scale.values.length - 1) && unknownsN >= (ec.split?.unknowns_min ?? 0.6);
+
+  const dimConf = {
+    scope: answers.effort_scope?.confidence,
+    unknowns: answers.effort_unknowns?.confidence,
+    coordination: answers.effort_coordination?.confidence,
+  };
+  const effortConf = weightedConfidence(dimConf, ec.weights);
+  const estimableConf = nounConfidence(estimable);
+  const confidence =
+    effortConf == null ? estimableConf
+    : estimableConf == null ? effortConf
+    : Math.min(effortConf, estimableConf);
+
+  const recommendation = blockers.length ? "refine" : shouldSplit ? "split" : "estimate";
+
+  return {
+    recommendation,
+    // Withheld rather than guessed. Linear feeds estimates into cycle capacity
+    // and project graphs, where nobody downstream can see it was a shrug.
+    value: recommendation === "estimate" ? value : null,
+    display: recommendation === "estimate" ? display : null,
+    scale: scale.type,
+    scale_index: index,
+    would_have_been: recommendation === "estimate" ? null : { value, display },
+    effort: round(effort),
+    dimensions: {
+      scope: { normalized: round(scopeN), raw: round(answers.effort_scope?.score), confidence: round(answers.effort_scope?.confidence) },
+      unknowns: { normalized: round(unknownsN), raw: round(answers.effort_unknowns?.score), confidence: round(answers.effort_unknowns?.confidence) },
+      coordination: { normalized: round(coordN), raw: round(answers.effort_coordination?.score), confidence: round(answers.effort_coordination?.confidence) },
+    },
+    is_estimable: round(estimable),
+    blockers,
+    confidence: round(confidence),
+    dimension_confidences: dimConf,
   };
 }
 
@@ -454,34 +593,123 @@ async function mapPool(items, limit, fn) {
   return out;
 }
 
-async function triageIssues(input, cfg) {
+async function triageIssues(input, cfg, opts) {
   const { issues = [], labels = [] } = input;
-  const usage = { input_tokens: 0, output_tokens: 0, requests: 0, label_questions: 0 };
+  const scale = resolveScale(input.estimation, cfg);
+
+  if (opts.only === "estimate" && !scale) {
+    throw new Error(
+      "--only estimate needs an estimate scale. Pass {\"estimation\":{\"type\":\"fibonacci\"}} in the input, " +
+        "or run scope.mjs first and read its estimation_hint.",
+    );
+  }
+
+  const usage = { input_tokens: 0, output_tokens: 0, requests: 0, label_questions: 0, effort_questions: 0 };
+  const dryRuns = [];
 
   const proposals = await mapPool(issues, 6, async (issue) => {
+    const base = {
+      id: issue.id,
+      identifier: issue.identifier ?? issue.id,
+      title: issue.title,
+      url: issue.url ?? null,
+      current: {
+        priority: issue.priority ?? null,
+        estimate: issue.estimate ?? null,
+        labels: issue.labels ?? [],
+        state: issue.state ?? null,
+      },
+    };
+
+    // Block before spending. An issue a person already sized does not need an
+    // effort judgment unless the user explicitly asked for a re-estimate.
+    const alreadyEstimated = typeof issue.estimate === "number";
+    const wantEstimate =
+      Boolean(scale) &&
+      opts.only !== "priority" &&
+      (!alreadyEstimated || opts.reestimate || cfg.estimation.reestimate_existing);
+    const tasks = {
+      priority: opts.only !== "estimate",
+      labels: opts.only !== "estimate",
+      estimate: wantEstimate,
+    };
+
+    const skippedEstimate =
+      scale && !wantEstimate && opts.only !== "priority"
+        ? { skipped: "already_estimated", current: issue.estimate, note: "Pass --reestimate to propose a replacement." }
+        : null;
+
+    if (!tasks.priority && !tasks.estimate) {
+      return { ...base, proposed: {}, estimate: skippedEstimate, staleness: staleness(issue, cfg) };
+    }
+
     try {
-      const plan = planLabels(issue, labels, cfg);
-      const questions = clean(buildQuestions(cfg, plan));
-      const res = await systemOne({ model: cfg.model, state: issueState(issue), questions });
+      const plan = tasks.labels ? planLabels(issue, labels, cfg) : { candidates: [], groups: [] };
+      const questions = clean(buildQuestions(cfg, plan, tasks));
+      const request = { model: cfg.model, state: issueState(issue), questions };
+
+      if (opts.dryRun) {
+        dryRuns.push({ identifier: base.identifier, question_count: Object.keys(questions).length, request });
+        return { ...base, dry_run: { question_count: Object.keys(questions).length, questions: Object.keys(questions) } };
+      }
+
+      const res = await systemOne(request);
       usage.requests++;
       usage.label_questions += plan.candidates.length + plan.groups.length;
+      if (tasks.estimate) usage.effort_questions += 4;
       usage.input_tokens += res.usage?.input_tokens ?? 0;
       usage.output_tokens += res.usage?.output_tokens ?? 0;
+
+      const answers = res.answers ?? {};
+      const proposed = tasks.priority ? composePriority(cfg, answers, plan, tasks) : {};
+      const estimate = tasks.estimate ? composeEstimate(cfg, answers, scale) : skippedEstimate;
+
+      // Tier on everything the pass actually decided. An estimate-only run has
+      // no priority confidence to tier on, and a combined run should not call an
+      // issue confident because half of it was.
+      const parts = [proposed.confidence, estimate?.confidence].filter((c) => typeof c === "number");
+      const confidence = parts.length ? Math.min(...parts) : null;
+
+      const uncertainBelow = cfg.confidence.uncertain_below ?? 0.35;
+      const uncertain = Object.entries({ ...(proposed.dimension_confidences ?? {}), ...(estimate?.dimension_confidences ?? {}) })
+        .filter(([, v]) => typeof v === "number" && v < uncertainBelow)
+        .map(([k, v]) => ({ dimension: k, confidence: round(v) }));
+
+      delete proposed.dimension_confidences;
+      if (estimate) delete estimate.dimension_confidences;
+
       return {
-        id: issue.id,
-        identifier: issue.identifier ?? issue.id,
-        title: issue.title,
-        url: issue.url ?? null,
-        current: { priority: issue.priority ?? null, labels: issue.labels ?? [], state: issue.state ?? null },
-        proposed: compose(cfg, res.answers ?? {}, plan),
+        ...base,
+        proposed: {
+          ...proposed,
+          hygiene: {
+            has_repro: round(answers.has_repro?.noul),
+            is_actionable: round(answers.is_actionable?.noul),
+          },
+          confidence: round(confidence),
+          uncertain_dimensions: uncertain,
+          review_tier:
+            confidence == null ? "needs_attention"
+            : confidence >= cfg.confidence.auto_suggest ? "confident"
+            : confidence >= cfg.confidence.needs_attention ? "review"
+            : "needs_attention",
+        },
+        ...(estimate ? { estimate } : {}),
         staleness: staleness(issue, cfg),
       };
     } catch (err) {
-      return { id: issue.id, identifier: issue.identifier ?? issue.id, title: issue.title, error: String(err.message ?? err) };
+      return { ...base, error: String(err.message ?? err) };
     }
   });
 
-  return { model: cfg.model, usage, proposals };
+  return {
+    model: cfg.model,
+    tasks: { priority: opts.only !== "estimate", estimate: Boolean(scale) && opts.only !== "priority" },
+    estimation: scale ? { type: scale.type, extended: scale.extended, values: scale.values } : null,
+    usage,
+    proposals,
+    ...(opts.dryRun ? { dry_run_requests: dryRuns } : {}),
+  };
 }
 
 async function judgeDuplicates(input, cfg) {
@@ -547,14 +775,19 @@ async function readStdin() {
 
 async function main() {
   const args = process.argv.slice(2);
-  const mode = args.includes("--mode") ? args[args.indexOf("--mode") + 1] : "triage";
-  const configPath = args.includes("--config") ? args[args.indexOf("--config") + 1] : null;
+  const val = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : null);
+  const mode = val("--mode") ?? "triage";
+  const only = val("--only") ?? "all";
+  if (!["all", "priority", "estimate"].includes(only)) {
+    throw new Error(`--only takes all, priority, or estimate (got "${only}")`);
+  }
 
-  const cfg = loadConfig(configPath);
+  const cfg = loadConfig(val("--config"));
   const input = await readStdin();
   if (input.config) Object.assign(cfg, input.config);
 
-  const result = mode === "duplicates" ? await judgeDuplicates(input, cfg) : await triageIssues(input, cfg);
+  const opts = { only, reestimate: args.includes("--reestimate"), dryRun: args.includes("--dry-run") };
+  const result = mode === "duplicates" ? await judgeDuplicates(input, cfg) : await triageIssues(input, cfg, opts);
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 

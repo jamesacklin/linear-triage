@@ -24,6 +24,36 @@
       "prompt": "what should the team pick up next week? we've got maybe 80 open issues on ENG",
       "expected_output": "Scopes to open non-terminal issues on the team, excludes priority=0 from ranking rather than letting unprioritized issues sort to the top, and ranks by composite urgency showing the dimension breakdown.",
       "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Everything we just moved to Backlog needs a priority and a size. Can you do that pass?",
+      "expected_output": "Runs scope.mjs with --state-type backlog and reports the selection tally (fetched → matched → selected) before spending anything. Establishes the team's estimate scale first — from scope.mjs's estimation_hint, or by asking — rather than assuming Fibonacci. Runs a single combined judge.mjs pass so priority and estimate share one request per issue, and presents both columns for approval.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Size everything in the Beta milestone so we can see if it fits in the cycle.",
+      "expected_output": "Scopes with --project and --milestone, uses --only estimate so no label or priority questions are paid for, and leaves already-estimated issues alone unless asked. Surfaces 'split' and 'refine' recommendations as recommendations rather than writing them to the estimate field, and does not invent a number for issues that came back unestimable.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "There's a pile of stuff sitting in the Native app project that never got assigned to a milestone. Triage it.",
+      "expected_output": "Recognizes that 'in a project with no milestone' has no Linear filter equivalent, so fetches the project's issues wide and partitions locally with scope.mjs --project 'Native app' --no-milestone. Does not claim the connector filtered it.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "These estimates are coming out way too big — a 5 for something that took an afternoon.",
+      "expected_output": "Treats this as a band problem rather than a rubric problem, and reruns retune.mjs with tighter --bands against the saved proposals with no new API calls. Explains that rewording an effort level would instead require re-judging, and reports exactly which issues changed size.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "Go ahead and estimate the backlog.",
+      "expected_output": "Does not assume an estimate scale. Checks scope.mjs's estimation_hint and, when the observed values fit more than one scale (or no issue carries an estimate at all), asks which scale the team uses rather than defaulting to Fibonacci.",
+      "files": []
     }
   ]
 }
